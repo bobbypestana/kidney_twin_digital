@@ -35,7 +35,7 @@ def run_silver_layer():
     WITH unified_raw AS (
         -- Source: 25-11-2025 (Join with segs to get demographics)
         SELECT 
-            e.record_id, 
+            '25-11-2025_' || e.record_id AS record_id, 
             s.current_age, 
             s.sex, 
             e.egfr_date AS egfr_date_str, 
@@ -46,6 +46,19 @@ def run_silver_layer():
         LEFT JOIN (
             SELECT record_id, current_age, sex FROM {bronze_schema}.data_25112025_segs GROUP BY 1, 2, 3
         ) s ON e.record_id = s.record_id
+        
+        UNION ALL
+        
+        -- Source: 12-03-2026
+        SELECT 
+            '12-03-2026_' || CAST(record_id AS VARCHAR) AS record_id,
+            TRY_CAST(REGEXP_EXTRACT(age_at_egfr, '~\\s*(\\d+)', 1) AS INTEGER) AS current_age,
+            'F' AS sex,
+            egfr_date AS egfr_date_str,
+            egfr_value,
+            serum_creatinine,
+            source_folder
+        FROM {bronze_schema}.data_12032026_egfr
     )
     SELECT 
         * EXCLUDE (egfr_date_str, sex),
@@ -77,19 +90,61 @@ def run_silver_layer():
     # 3. Standardize Segmentations
     logger.info("Standardizing Segmentations...")
     
-    # 3a. Source: 25-11-2025 (Already Wide, just mapping)
-    pivoted_25112025 = conn.execute(f"SELECT * FROM {bronze_schema}.data_25112025_segs").df()
-    pivoted_25112025['record_id'] = pivoted_25112025['record_id'].astype(str)
+    # 3a. Source: 25-11-2025 (Already Wide)
+    df_25112025 = conn.execute(f"SELECT * FROM {bronze_schema}.data_25112025_segs").df()
+    df_25112025['record_id'] = '25-11-2025_' + df_25112025['record_id'].astype(str)
     
-    # Standardize Sex
-    if 'sex' in pivoted_25112025.columns:
-        pivoted_25112025['sex'] = pivoted_25112025['sex'].map({
-            'male': 'M', 'm': 'M', 'Male': 'M',
-            'female': 'F', 'f': 'F', 'Female': 'F', 'F': 'F'
-        }).fillna(pivoted_25112025['sex'])
+    # 3b. Source: 12-03-2026 (Long format, needs pivoting and deduplication)
+    # First, get the 'best' demographics per record_id (closest to scan_date)
+    demog_query = f"""
+    WITH best_egfr AS (
+        SELECT 
+            record_id,
+            age_at_egfr,
+            egfr_date,
+            time_between_egfr_and_scan,
+            ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY abs(time_between_egfr_and_scan) ASC) as rn
+        FROM {bronze_schema}.data_12032026_egfr
+    )
+    SELECT 
+        '12-03-2026_' || CAST(record_id AS VARCHAR) AS record_id,
+        TRY_CAST(REGEXP_EXTRACT(age_at_egfr, '~\\s*(\\d+)', 1) AS INTEGER) AS current_age,
+        'F' as sex,
+        CAST(CAST(egfr_date AS DATE) - CAST(time_between_egfr_and_scan AS INTEGER) AS DATE) as scan_date
+    FROM best_egfr
+    WHERE rn = 1
+    """
+    df_demog_12032026 = conn.execute(demog_query).df()
+    
+    df_meas_raw = conn.execute(f"SELECT * FROM {bronze_schema}.data_12032026_meas").df()
+    
+    # Standardize structure names
+    def standardize_structure(s):
+        s = s.replace('kidney_artery_left', 'left_kidney_artery')
+        s = s.replace('kidney_artery_right', 'right_kidney_artery')
+        s = s.replace('kidney_vein_left', 'left_kidney_vein')
+        s = s.replace('kidney_vein_right', 'right_kidney_vein')
+        return s
+
+    df_meas_raw['anatomical_structure'] = df_meas_raw['anatomical_structure'].apply(standardize_structure)
+    df_meas_raw['col_name'] = df_meas_raw['phase'] + '_' + df_meas_raw['anatomical_structure']
+    
+    pivoted_12032026 = df_meas_raw.pivot(index='record_id', columns='col_name', values='iodine_concentration').reset_index()
+    pivoted_12032026['record_id'] = '12-03-2026_' + pivoted_12032026['record_id'].astype(str)
+    pivoted_12032026['source_folder'] = '12-03-2026'
+    
+    # Merge measurements with the 'best' demographics
+    pivoted_12032026 = pivoted_12032026.merge(df_demog_12032026, on='record_id', how='left')
     
     # 4. Union Scans
-    final_scans = pd.concat([pivoted_25112025], ignore_index=True, sort=False)
+    final_scans = pd.concat([df_25112025, pivoted_12032026], ignore_index=True, sort=False)
+    
+    # Standardize Sex in segmentations
+    final_scans['sex'] = final_scans['sex'].map({
+        'male': 'M', 'm': 'M', 'Male': 'M', 'M': 'M',
+        'female': 'F', 'f': 'F', 'Female': 'F', 'F': 'F'
+    }).fillna(final_scans['sex'])
+    
     # Standardize dates in duckdb
     conn.execute(f"CREATE OR REPLACE TABLE {silver_schema}.segs_raw AS SELECT * FROM final_scans")
     conn.execute(f"""
@@ -99,13 +154,13 @@ def run_silver_layer():
             COALESCE(
                 TRY_CAST(scan_date AS DATE),
                 TRY_STRPTIME(scan_date, '%d-%m-%Y'),
-                TRY_STRPTIME(scan_date, '%Y-%m-%d')
+                TRY_STRPTIME(scan_date, '%Y-%m-%d'),
+                TRY_STRPTIME(scan_date, '%Y/%m/%d')
             ) AS scan_date
         FROM {silver_schema}.segs_raw
     """)
     
     logger.info(f"Silver Layer Completion: Standardized scans and dates.")
-    conn.execute(f"DROP TABLE IF EXISTS {silver_schema}.egfr_raw")
     conn.execute(f"DROP TABLE IF EXISTS {silver_schema}.segs_raw")
     conn.close()
 
