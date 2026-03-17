@@ -1,0 +1,162 @@
+# vGFR ML Model — Full Results
+
+## Final MVP Candidates
+
+After extensive exploration (R1-R10) balancing explainability, precision, and variance tracking, here are the absolute best models for the vGFR digital twin:
+
+### 1. Best Overall Accuracy & Variance Tracking (Highest R² & Lowest RMSE)
+**Model:** BayesianRidge (Round 2)
+**Features Selected (11):** `current_age`, `arterial_venecava_between_kidney_hepatic`, `E_late_right`, `norm_vein_arterial_right`, `arterial_portal_vein`, `LR_ratio_vein_venous`, `mean_artery_venous`, `late_venacava_above_hepatic`, `late_left_hepatic_vein`, `E_arterial_right`, `norm_artery_venous_right`
+**Metrics:** R² = 0.574 | MAE = 7.53 | RMSE = 10.10
+
+![Best R2 & RMSE](C:/Users/FilipeFurlanBellotti/.gemini/antigravity/brain/57116b73-dc20-45af-ad08-f4c454feaafe/final_r2_rmse.png)
+
+### 2. Best Absolute Precision (Lowest MAE)
+**Model:** Support Vector Machine (SVR rbf) (Round 7)
+**Features Selected (4):** `current_age`, `arterial_venacava_below_kidney`, `arterial_right_kidney_vein`, `norm_vein_late_right`
+**Metrics:** R² = 0.467 | MAE = 6.59 | RMSE = 11.30
+
+![Best MAE](C:/Users/FilipeFurlanBellotti/.gemini/antigravity/brain/57116b73-dc20-45af-ad08-f4c454feaafe/final_mae.png)
+
+### 3. Best Balanced Trade-off (Blended Rank Competition)
+**Model:** Ridge (Round 10)
+**Features Selected (7):** `current_age`, `arterial_venecava_between_kidney_hepatic`, `E_late_right`, `E_arterial_right`, `arterial_portal_vein`, `norm_artery_venous_right`, `LR_ratio_vein_venous`
+**Metrics:** R² = 0.532 | MAE = 7.04 | RMSE = 10.59
+
+![Best Balanced](C:/Users/FilipeFurlanBellotti/.gemini/antigravity/brain/57116b73-dc20-45af-ad08-f4c454feaafe/final_balanced.png)
+
+
+## Progress Across Rounds
+
+| Round | Best Model | R² | MAE | Improvement |
+|-------|-----------|-----|-----|-------------|
+| Baseline | Ridge top-10 corr, α=10 | 0.406 | 8.67 | — |
+| R1 | Ridge + forward stepwise (11 feats) | 0.533 | 7.33 | +0.127 |
+| R2 | **Bayesian Ridge + stepwise** | **0.574** | **7.53** | **+0.168** |
+
+## Round 2 Experiments Summary
+
+| Exp | Strategy | R² | MAE |
+|-----|----------|-----|-----|
+| **A3** | **Stepwise + BayesianRidge** | **0.574** | **7.53** |
+| A1 | Stepwise + α=5 tuning | 0.565 | 7.35 |
+| C1-3 | Gold + bronze features | 0.480 | 7.55 |
+| B3 | Stacking ensemble | 0.474 | 7.93 |
+| A2 | Stepwise + log-target | 0.468 | 8.56 |
+| B2 | SVR (C=100) | 0.261 | 9.47 |
+| D1 | Per-kidney sum | 0.128 | 10.23 |
+| B1 | GP Regression | −0.086 | 12.14 |
+
+![Round 2 comparison](C:/Users/FilipeFurlanBellotti/.gemini/antigravity/brain/57116b73-dc20-45af-ad08-f4c454feaafe/round2_comparison.png)
+
+## Uncertainty Quantification (Experiment E)
+
+| Model | R² | 95% CI Coverage | Mean CI Width |
+|-------|-----|-----------------|---------------|
+| **BayesianRidge** | **0.574** | **96%** | **46.8 mL/min/1.73m²** |
+| GP (Matérn) | −0.086 | 88% | 63.1 mL/min/1.73m² |
+
+> [!IMPORTANT]
+> BayesianRidge achieves 96% CI coverage (ideal is 95%) with a tighter CI width than GP, making it the best choice for the digital twin where per-patient confidence bounds are needed.
+
+## Round 3, 4 & 5 Experiments (Feature Restrictions, Explainability & MAE Optimization)
+
+To test the robustness of the features and alternative optimization goals, several structural restrictions were applied:
+
+| Exp | Strategy | R² | MAE |
+|-----|----------|-----|-----|
+| I2 | **Pairwise Bilateral** (BayesianRidge) | 0.465 | 8.23 |
+| F1 | **Remove Age** (Stepwise R²) | 0.465 | 8.89 |
+| G1 | **Bilateral Mean** (Stepwise R²) | 0.463 | 7.83 |
+| J1 | **Optimize directly for MAE** (Stepwise MAE) | 0.419 | 7.48 |
+| H1 | **Strict Kidney-Only** (Stepwise R²) | 0.159 | 10.59 |
+
+**The Pairwise Bilateral Model (I2)** forces the stepwise selection to pick left/right features together as pairs (e.g., if it wants the left kidney extraction ratio, it *must* also take the right kidney extraction ratio). This makes clinical justification easier. The model selected 7 features:
+1. `current_age`
+2. `arterial_venecava_between_kidney_hepatic` (Systemic baseline)
+3. `E_late_left` & `E_late_right` (Extraction ratio pair)
+4. `norm_vein_arterial_left` & `norm_vein_arterial_right` (Venous washout pair)
+5. `arterial_portal_vein` (Systemic baseline)
+
+## Round 6 Experiment (MAE vs RMSE Global Competition)
+
+Previous rounds defined "best" by R². To find the true optimal models for absolute precision (MAE) and outlier-avoidance (RMSE), a forward stepwise selection was run across 7 different algorithm families, explicitly minimizing MAE and RMSE directly.
+
+### Best MAE Models (Absolute Precision)
+| Rank | Algorithm | MAE | Features Selected | R² Equivalent |
+|------|-----------|-----|-------------------|---------------|
+| 1 | **SVR (RBF Kernel)** | **6.77** | 3 (`norm_artery_arterial_right`, `mean_artery_venous`, `E_venous_mean`) | 0.373 |
+| 2 | Random Forest | 7.28 | 4 | 0.429 |
+| 3 | ElasticNet | 7.48 | 3 | 0.398 |
+
+*Note: The SVR dropped the average error below 7.0 for the first time, though its R² is very low, meaning it sacrificed overall variance tracking to aggressively minimize the average distance to the identity line.*
+
+### Best RMSE Models (Outlier Avoidance)
+| Rank | Algorithm | RMSE | Features Selected | R² Equivalent |
+|------|-----------|------|-------------------|---------------|
+| 1 | **Bayesian Ridge** | **10.86** | 3 (`current_age`, `arterial_venecava_between_kidney_hepatic`, `LR_ratio_artery_venous`) | 0.507 |
+| 2 | Ridge | 11.08 | 4 | 0.487 |
+| 3 | Lasso | 11.29 | 4 | 0.467 |
+
+## Round 7 Experiment (Blended Metric "Jack-of-all-trades" Search)
+
+To find a model that balances all clinical priorities, a blended feature search was run across all 7 algorithms. Features were selected based on their average rank across MAE (lowest is best), RMSE (lowest is best), and R² (highest is best).
+
+### Best Balanced Models (Compound Score)
+| Rank | Algorithm | MAE | RMSE | R² | Features Selected |
+|------|-----------|-----|------|----|-------------------|
+| 1 | **SVR (RBF Kernel)** | **6.59** | 11.30 | 0.467 | 4 (`current_age`, `arterial_venacava_below_kidney`, `arterial_right_kidney_vein`, `norm_vein_late_right`) |
+| 2 | Bayesian Ridge | 7.61 | **10.86** | **0.507** | 3 (`current_age`, `E_late_right`, `arterial_venecava_between_kidney_hepatic`) |
+| 3 | Ridge | 7.74 | 11.08 | 0.487 | 4 |
+
+*Note: The blended search actually found an even better feature combination for SVR, driving the MAE down to an astonishing **6.59** while keeping RMSE and R² reasonable. Bayesian Ridge remains the most robust choice if avoiding large RMSE penalties is the priority.*
+
+## Round 8 Experiment (Forcing Minimum N Features)
+To test if the models were getting "stuck" in local optimal score landscapes too early (e.g., stopping at 3 features), a forced-stepwise search was run. The algorithm was commanded to keep selecting features (even if the score temporarily worsened) until it reached `N=7` features, to see if adding feature #5, #6, or #7 unlocked a massive hidden improvement.
+
+**Results:** No better scores were found. In all cases (SVR, Ridge, BayesianRidge), the model's highest actual performance was achieved early (between 3 and 5 features). Forcing it deeper into the feature pool just resulted in overfitting and worse absolute metrics. The dataset (n=25) is too small to support deep combinations without degrading generalizability.
+
+## Round 9 Experiment (Forcing Minimum N Features WITHOUT Age)
+To see if deeper combinations of CT structural features could eventually "figure out" a patient's biological age implicitly, we repeated the Forced N=7 search but strictly removed the `current_age` feature from the candidate pool.
+
+**Results:** The performance collapsed across all algorithms. The best achievable MAE without age degraded to **~9.09 mL/min/1.73m²** (BayesianRidge, 5 features). SVR, which previously achieved a 6.59 MAE, worsened to 9.14. 
+*Conclusion:* Age is biologically irreducible in this dataset. The CT visible features (volumes, contrast phases, intensities) do not contain a reliable proxy for the systemic degradation caused by age that the eGFRc formula intrinsically expects.
+
+## Round 10 Experiment (Blended Search with Bronze Volumes & HU Data)
+To ensure we didn't miss useful structure in previous runs, the "Blended Rank Stepwise Search" (which optimizes for MAE, RMSE, and R2 simultaneously) was unleashed across *all 7 algorithm families*, allowing them to pick from both the Gold *and* the thousands of Bronze features (Volume, Voxel counts, HU Means/Std/Median/Percentiles for every segment).
+
+**Results:** None of the algorithms were able to beat the top MAE from the Gold-only dataset.
+1. **Ridge** won the blended competition (MAE 7.04, RMSE 10.59, R² 0.532). It used 7 features, *all* of which were Gold features. It actively ignored the Bronze volumes.
+2. **SVR** achieved a highly competitive MAE of 6.66 (RMSE 11.40). It did select exactly one Bronze feature (`venous_venous_renal_vein_left_3_hu_std`), but its overall score was still slightly worse than the 6.59 MAE it achieved in Round 7 using only 4 strict Gold features.
+*Conclusion:* The Gold physical features ([_mean](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r3.py#222-250) intensities, `E_` extraction ratios, baseline timing contrasts against reference vessels) are vastly superior information densities than raw segment volumes for a sample size of N=25.
+
+## Key Insights
+
+- **Age is structurally critical**: Removing `current_age` drops R² from 0.533 down to 0.465. eGFRc itself incorporates age; the CT features alone struggle to deduce it.
+- **Asymmetry is informative**: Forcing the model to use only bilateral mean ([_mean](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r3.py#222-250)) features drops R² to 0.463. Allowing the algorithm to independently select left vs. right features is better, perhaps because localized damage is asymmetric.
+- **Explainability vs Performance Trade-off**: Forcing strict "left & right pairs" (Round 4) drops R² to 0.465. 
+- **MAE vs RMSE tension**: The best model for tracking overall variance (BayesianRidge R²=0.574) is different from the best model for minimizing average absolute error (SVR MAE=6.77). The SVR achieved this with just 3 features but had a low R² (0.373), indicating it makes very safe, clustered predictions but fails to capture the full structural shape of the data. 
+- **Systemic vessels are essential calibration points**: The "Strict Kidney-Only" model (which stripped out age, liver, vena cava, portal vein) collapsed to R²=0.159! The model *needs* large reference vessels (hepatic, portal, vena cava) to calibrate the raw kidney HU intensities against individual patient circulation timing.
+- **Stepwise features remain dominant** — the 11 features selected by forward greedy search are consistently best over other feature sets.
+- **BayesianRidge > Ridge** — automatic relevance determination in BayesianRidge effectively handles multicollinearity.
+- **GP fails at n=25** — insufficient data for reliable kernel hyperparameter estimation in LOOCV.
+- **Bronze volumes didn't help** — Ridge with heavy regularization (α=20) already handles the 2000+ bronze features, but can't extract additional signal beyond gold.
+- **Per-kidney models don't work** — without per-kidney ground truth, the 50/50 split assumption fails.
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| [vgfr_model.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_model.py) | Baseline + MLflow |
+| [vgfr_improvements.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements.py) | Round 1 (6 experiments) |
+| [vgfr_improvements_r2.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r2.py) | Round 2 (A-E experiments) |
+| [vgfr_improvements_r3.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r3.py) | Round 3 (feature restrictions) |
+| [vgfr_improvements_r4.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r4.py) | Round 4 (explainable pairwise model) |
+| [vgfr_improvements_r5.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r5.py) | Round 5 (MAE optimization on Ridge) |
+| [vgfr_improvements_r6.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r6.py) | Round 6 (MAE & RMSE competition all algorithms) |
+| [vgfr_improvements_r7.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r7.py) | Round 7 (Blended metric competition) |
+| [vgfr_improvements_r8.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r8.py) | Round 8 (Minimum N Forced Search) |
+| [vgfr_improvements_r9.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r9.py) | Round 9 (Minimum N Forced Search WITHOUT Age) |
+| [vgfr_improvements_r10.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/vgfr_improvements_r10.py) | Round 10 (Bronze Volumes Blended Search) |
+| [plot_egfrc_vs_vgfr.py](file:///c:/Users/FilipeFurlanBellotti/OneDrive%20-%20Kvantify/Kvantify%20-%20WP5%20-%20Health%20Sector%20Use%20Case/DanQ-WP5%20Kvantify-HGH/data_analisys/classical_ml/plot_egfrc_vs_vgfr.py) | Reusable eGFRc vs vGFR plotting |
+| `C:/tmp/mlflow_vgfr` | MLflow tracking store |

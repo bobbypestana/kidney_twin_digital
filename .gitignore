@@ -1,0 +1,66 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Environments ---
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Data & Databases ---
+database/*.duckdb
+database/*.db
+data/
+raw_data/
+
+# --- Logs ---
+*.log
+01_ingestion_pipeline/logs/
+
+# --- ML Results & Outputs ---
+**/ml_results*/
+**/plots/
+**/figures/
+
+# --- Local Configurations ---
+config.yaml
+local_config.yaml
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints
+
+# --- IDEs & OS ---
+.vscode/
+.idea/
+.project
+.pydevproject
+.settings/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

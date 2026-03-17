@@ -1,0 +1,33 @@
+# Data Pipeline Configuration (Template)
+# Copy this file to config.yaml and update the paths for your local environment.
+
+paths:
+  # Base directory for source data
+  source_data: "path/to/your/source/data"
+  
+  # DuckDB database file
+  database: "g:/My Drive/kvantify/DanQ_health/analysis/database/egfr_data_v2.duckdb"
+  
+  # Log directory
+  logs: "g:/My Drive/kvantify/DanQ_health/analysis/01_ingestion_pipeline/logs"
+
+# Schema Names
+schemas:
+  bronze: "bronze"
+  silver: "silver"
+  gold: "gold"
+
+# Ingestion Settings
+ingestion:
+  sources:
+    - name: "31-08-2025"
+      type: "nested_folder"
+    - name: "25-11-2025"
+      type: "flat_csv"
+    - name: "12-03-2026"
+      type: "flat_csv_v2"
+
+# Validation Settings
+validation:
+  strict_egfr: true  # Only include cases with eGFR in Gold layer
+  rpf_fixed: 600.0   # Renal Plasma Flow constant

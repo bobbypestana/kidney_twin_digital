@@ -1,0 +1,240 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{Medical Imaging Project: Kidney Analysis with Multi-Phase CT Scans}
+\author{Project Documentation}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Project Overview}
+
+This project focuses on advanced kidney analysis using multi-phase CT (Computed Tomography) imaging data. The study involves comprehensive segmentation, measurement, and functional assessment of kidney function through contrast-enhanced CT scans and eGFR (estimated Glomerular Filtration Rate) calculations.
+
+\section{CT Scan Data with Different Contrast Phases}
+
+\subsection{Multi-Phase CT Imaging Protocol}
+
+Multi-phase CT imaging is a sophisticated technique that captures images at different time points after contrast agent injection, allowing for comprehensive assessment of kidney function and anatomy.
+
+\subsubsection{Arterial Phase (Early Phase)}
+\begin{itemize}
+    \item \textbf{Timing}: 15-25 seconds after contrast injection
+    \item \textbf{Purpose}: Captures the arterial blood supply to the kidneys
+    \item \textbf{Key Features}:
+    \begin{itemize}
+        \item High contrast in renal arteries
+        \item Clear visualization of arterial anatomy
+        \item Assessment of arterial stenosis or abnormalities
+        \item Early enhancement of kidney cortex
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Venous Phase (Portal Phase)}
+\begin{itemize}
+    \item \textbf{Timing}: 60-90 seconds after contrast injection
+    \item \textbf{Purpose}: Captures venous drainage and parenchymal enhancement
+    \item \textbf{Key Features}:
+    \begin{itemize}
+        \item Peak enhancement of kidney parenchyma
+        \item Visualization of renal veins
+        \item Assessment of venous drainage
+        \item Optimal for parenchymal volume measurements
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Late Phase (Delayed Phase)}
+\begin{itemize}
+    \item \textbf{Timing}: 3-5 minutes after contrast injection
+    \item \textbf{Purpose}: Captures contrast excretion and collecting system
+    \item \textbf{Key Features}:
+    \begin{itemize}
+        \item Contrast in renal collecting system
+        \item Assessment of kidney function
+        \item Visualization of ureters and bladder
+        \item Evaluation of contrast excretion
+    \end{itemize}
+\end{itemize}
+
+\subsection{Technical Specifications}
+\begin{itemize}
+    \item \textbf{Image Format}: DICOM (Digital Imaging and Communications in Medicine)
+    \item \textbf{File Structure}: Organized by case numbers (1-25)
+    \item \textbf{Data Organization}:
+    \begin{itemize}
+        \item \texttt{IOD\_arterial/}: Arterial phase DICOM files
+        \item \texttt{IOD\_venous/}: Venous phase DICOM files  
+        \item \texttt{IOD\_late/}: Late phase DICOM files
+    \end{itemize}
+\end{itemize}
+
+\section{Kidney Segmentation and Analysis}
+
+\subsection{Segmentation Process}
+
+The kidney segmentation process involves precise delineation of kidney structures from CT images using advanced image processing techniques.
+
+\subsubsection{Segmented Structures}
+\begin{enumerate}
+    \item \textbf{Kidney Parenchyma}: The functional tissue of the kidney
+    \item \textbf{Renal Arteries}: Blood vessels supplying the kidney
+    \item \textbf{Renal Veins}: Blood vessels draining the kidney
+    \item \textbf{Cortex}: Outer layer of kidney tissue
+    \item \textbf{Medulla}: Inner region of kidney tissue
+\end{enumerate}
+
+\subsubsection{Segmentation Output Files}
+\begin{itemize}
+    \item \textbf{\texttt{.seg.nrrd}}: Segmentation files in NRRD format
+    \item \textbf{\texttt{.nrrd}}: Volume data files
+    \item \textbf{\texttt{.csv}}: Measurement tables with quantitative data
+    \item \textbf{\texttt{.mrml}}: 3D Slicer scene files for visualization
+\end{itemize}
+
+\subsubsection{Quantitative Measurements}
+The segmentation provides detailed measurements including:
+\begin{itemize}
+    \item \textbf{Volume measurements} (mm\textsuperscript{3}, cm\textsuperscript{3})
+    \item \textbf{Voxel counts} for each segmented structure
+    \item \textbf{Intensity statistics} (mean, median, standard deviation)
+    \item \textbf{Percentile values} (5th, 95th percentiles)
+    \item \textbf{Minimum and maximum intensity values}
+\end{itemize}
+
+\subsection{Example Measurement Data}
+\begin{verbatim}
+Segment: arterial_threshold_1
+- Volume: 1,639.82 cm³
+- Mean intensity: 194.116 HU
+- Standard deviation: 98.376 HU
+- Voxel count: 2,944,174
+\end{verbatim}
+
+\section{eGFR (Estimated Glomerular Filtration Rate) Calculations}
+
+\subsection{What is eGFR?}
+
+eGFR is a crucial measure of kidney function that estimates how well the kidneys are filtering waste from the blood. It's calculated using serum creatinine levels and other factors.
+
+\subsection{Clinical Significance}
+\begin{itemize}
+    \item \textbf{Normal eGFR}: $>$90 mL/min/1.73m\textsuperscript{2}
+    \item \textbf{Mild reduction}: 60-89 mL/min/1.73m\textsuperscript{2}
+    \item \textbf{Moderate reduction}: 30-59 mL/min/1.73m\textsuperscript{2}
+    \item \textbf{Severe reduction}: 15-29 mL/min/1.73m\textsuperscript{2}
+    \item \textbf{Kidney failure}: $<$15 mL/min/1.73m\textsuperscript{2}
+\end{itemize}
+
+\subsection{Data Structure in This Project}
+
+The eGFR data is stored in CSV files with the following structure:
+\begin{itemize}
+    \item \textbf{Patient ID}: Unique identifier for each case
+    \item \textbf{Date}: Date of eGFR measurement
+    \item \textbf{eGFR Value}: Calculated eGFR in mL/min/1.73m\textsuperscript{2}
+    \item \textbf{Serum Creatinine}: Laboratory value used in calculation
+    \item \textbf{Measurement Type}: Method used for eGFR calculation
+\end{itemize}
+
+\subsection{Longitudinal Analysis}
+The project includes longitudinal eGFR data showing:
+\begin{itemize}
+    \item \textbf{Multiple measurements} over time for each patient
+    \item \textbf{Trend analysis} of kidney function
+    \item \textbf{Correlation} between imaging findings and functional decline
+\end{itemize}
+
+\section{Project Data Structure}
+
+\subsection{Case Organization}
+\begin{verbatim}
+Cases/
+├── 1/                    # Case number
+│   ├── DICOM/           # Original DICOM files
+│   │   ├── IOD_arterial/ # Arterial phase images
+│   │   ├── IOD_venous/   # Venous phase images
+│   │   └── IOD_late/     # Late phase images
+│   ├── eGFR_1.csv       # eGFR measurements
+│   └── Segmenteringer/  # Segmentation results
+│       ├── *.seg.nrrd   # Segmentation files
+│       ├── *.nrrd       # Volume files
+│       ├── *.csv        # Measurement tables
+│       └── *.mrml       # 3D Slicer scenes
+\end{verbatim}
+
+\subsection{Key File Types}
+\begin{itemize}
+    \item \textbf{DICOM}: Medical imaging standard format
+    \item \textbf{NRRD}: Nearly Raw Raster Data format for volumes
+    \item \textbf{SEG.NRRD}: Segmentation data format
+    \item \textbf{CSV}: Tabular data for measurements
+    \item \textbf{MRML}: 3D Slicer scene files
+\end{itemize}
+
+\section{Clinical Applications}
+
+\subsection{Diagnostic Capabilities}
+\begin{enumerate}
+    \item \textbf{Kidney Function Assessment}: Quantitative evaluation of kidney performance
+    \item \textbf{Disease Progression}: Longitudinal monitoring of kidney function
+    \item \textbf{Treatment Planning}: Data-driven decisions for patient care
+    \item \textbf{Research Applications}: Large-scale analysis of kidney health
+\end{enumerate}
+
+\subsection{Research Value}
+\begin{itemize}
+    \item \textbf{Population Studies}: Analysis across multiple patients
+    \item \textbf{Method Validation}: Comparison of different measurement techniques
+    \item \textbf{Clinical Outcomes}: Correlation between imaging and functional data
+    \item \textbf{Biomarker Development}: Identification of imaging biomarkers
+\end{itemize}
+
+\section{Technical Tools and Software}
+
+\subsection{Primary Software}
+\begin{itemize}
+    \item \textbf{3D Slicer}: Open-source medical imaging platform
+    \item \textbf{Python}: Data analysis and processing
+    \item \textbf{Jupyter Notebooks}: Interactive analysis environment
+\end{itemize}
+
+\subsection{Data Analysis Capabilities}
+\begin{itemize}
+    \item \textbf{Volume Calculations}: Precise kidney volume measurements
+    \item \textbf{Intensity Analysis}: Quantitative assessment of contrast enhancement
+    \item \textbf{Statistical Analysis}: Comprehensive data processing
+    \item \textbf{Visualization}: 3D rendering and multi-planar views
+\end{itemize}
+
+\section{Future Directions}
+
+\subsection{Potential Enhancements}
+\begin{enumerate}
+    \item \textbf{Machine Learning}: Automated segmentation and analysis
+    \item \textbf{Predictive Modeling}: Risk stratification based on imaging data
+    \item \textbf{Standardization}: Development of standardized protocols
+    \item \textbf{Integration}: Connection with electronic health records
+\end{enumerate}
+
+\subsection{Research Opportunities}
+\begin{itemize}
+    \item \textbf{Biomarker Discovery}: Identification of new imaging biomarkers
+    \item \textbf{Population Health}: Large-scale epidemiological studies
+    \item \textbf{Precision Medicine}: Personalized treatment approaches
+    \item \textbf{Clinical Trials}: Support for interventional studies
+\end{itemize}
+
+\bigskip
+\hrule
+\bigskip
+
+\textit{This project represents a comprehensive approach to kidney analysis using modern medical imaging techniques, combining structural assessment through CT segmentation with functional evaluation through eGFR calculations.}
+
+\end{document}
