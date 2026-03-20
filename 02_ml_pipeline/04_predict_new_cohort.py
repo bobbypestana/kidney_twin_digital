@@ -117,8 +117,10 @@ def main():
     pred_df['is_discrepant'] = (pd.to_numeric(pred_df['egfr_value'], errors='coerce') - pred_df['egfrc']).abs() > 1
     
     plt.figure(figsize=(12, 10))
-    sns.scatterplot(data=pred_df, x='predicted_vgfr', y='egfrc', hue='is_discrepant', style='is_discrepant', 
-                    palette={True: 'red', False: 'blue'}, s=100, markers={True: 'X', False: 'o'})
+    sns.scatterplot(data=pred_df, x='predicted_vgfr', y='egfrc', hue='sex', style='is_discrepant', 
+                    palette={'M': '#1f77b4', 'F': '#e377c2'}, s=100, markers={True: 'X', False: 'o'})
+    
+    # Add a separate legend handle for the discrepancy symbol if needed, or rely on Seaborn auto-legend
     
     lims = [min(plt.xlim()[0], plt.ylim()[0]), max(plt.xlim()[1], plt.ylim()[1])]
     plt.plot(lims, lims, '--r', alpha=0.5, label='Identity (Pred=eGFRc)')

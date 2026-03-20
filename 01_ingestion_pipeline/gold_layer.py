@@ -54,7 +54,7 @@ def run_gold_layer():
         for phase in ['arterial', 'venous', 'late']:
             pivot_sqls.append(f"""
                 SELECT 
-                    CAST(case_number AS VARCHAR) as record_id,
+                    '25-11-2025_' || CAST(case_number AS VARCHAR) as record_id,
                     MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Volume cm3 (LM)" END) as {phase}_kidney_vol,
                     MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Mean" END) as {phase}_kidney_hu_mean,
                     MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Standard deviation" END) as {phase}_kidney_hu_std,
@@ -80,7 +80,10 @@ def run_gold_layer():
         ml_features_query = f"""
         CREATE OR REPLACE TABLE {gold_schema}.ml_features AS
         WITH base AS (
-            SELECT m.*, b.* EXCLUDE (record_id) 
+            SELECT 
+                m.* EXCLUDE (sex),
+                b.* EXCLUDE (record_id),
+                CASE m.sex WHEN 'M' THEN 1.0 WHEN 'F' THEN 0.0 ELSE NULL END AS sex
             FROM {gold_schema}.master_cases m
             LEFT JOIN bronze_pivoted b ON m.record_id = b.record_id
         ),
@@ -121,7 +124,14 @@ def run_gold_layer():
                 arterial_kidney_vol / NULLIF(current_age, 0) AS vol_per_age
             FROM mean_excretions
         )
-        SELECT * FROM interactions
+        SELECT * EXCLUDE (
+            source_folder, 
+            scan_date, 
+            egfr_date, 
+            egfr_value, 
+            serum_creatinine, 
+            date_diff_days
+        ) FROM interactions
         """
         conn.execute(ml_features_query)
         

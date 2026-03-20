@@ -3,16 +3,31 @@ import duckdb
 from lib.utils import load_config, setup_logging, get_db_connection
 
 def calculate_egfrc(row):
-    """CKD-EPI formula for eGFRc."""
+    """CKD-EPI 2009 formula for eGFRc."""
     try:
         pcc = pd.to_numeric(row.get('serum_creatinine'), errors='coerce')
         age = pd.to_numeric(row.get('current_age'), errors='coerce')
+        sex = row.get('sex')
         
         if pd.isna(pcc) or pd.isna(age) or pcc <= 0 or age <= 0:
             return None
             
-        alpha = -0.411 if pcc <= 80 else -1.209
-        return 141 * ((pcc / (0.9 * 88.4)) ** alpha) * (0.993 ** age)
+        # Conversion to mg/dL
+        cr = pcc / 88.4
+        
+        # Gender-specific parameters
+        if sex == 'F':
+            kappa = 0.7
+            alpha = -0.329 if cr <= 0.7 else -1.209
+            constant = 144
+        elif sex == 'M':
+            kappa = 0.9
+            alpha = -0.411 if cr <= 0.9 else -1.209
+            constant = 141
+        else:
+            return None
+            
+        return constant * ((cr / kappa) ** alpha) * (0.993 ** age)
     except:
         return None
 
@@ -51,14 +66,21 @@ def run_silver_layer():
         
         -- Source: 12-03-2026
         SELECT 
-            '12-03-2026_' || CAST(record_id AS VARCHAR) AS record_id,
-            TRY_CAST(REGEXP_EXTRACT(age_at_egfr, '~\\s*(\\d+)', 1) AS INTEGER) AS current_age,
-            'F' AS sex,
-            egfr_date AS egfr_date_str,
-            egfr_value,
-            serum_creatinine,
-            source_folder
-        FROM {bronze_schema}.data_12032026_egfr
+            '12-03-2026_' || CAST(TRY_CAST(e.record_id AS INTEGER) AS VARCHAR) AS record_id,
+            TRY_CAST(REGEXP_EXTRACT(e.age_at_egfr, '~\\s*(\\d+)', 1) AS INTEGER) AS current_age,
+            CASE 
+                WHEN f.sex = 0 THEN 'F'
+                WHEN f.sex = 1 THEN 'M'
+                ELSE NULL 
+            END AS sex,
+            e.egfr_date AS egfr_date_str,
+            e.egfr_value,
+            e.serum_creatinine,
+            e.source_folder
+        FROM {bronze_schema}.data_12032026_egfr e
+        LEFT JOIN (
+            SELECT TRY_CAST(record_id AS INTEGER) as record_id, MAX(sex) as sex FROM {bronze_schema}.data_12032026_full GROUP BY 1
+        ) f ON TRY_CAST(e.record_id AS INTEGER) = f.record_id
     )
     SELECT 
         * EXCLUDE (egfr_date_str, sex),
@@ -97,22 +119,17 @@ def run_silver_layer():
     # 3b. Source: 12-03-2026 (Long format, needs pivoting and deduplication)
     # First, get the 'best' demographics per record_id (closest to scan_date)
     demog_query = f"""
-    WITH best_egfr AS (
-        SELECT 
-            record_id,
-            age_at_egfr,
-            egfr_date,
-            time_between_egfr_and_scan,
-            ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY abs(time_between_egfr_and_scan) ASC) as rn
-        FROM {bronze_schema}.data_12032026_egfr
-    )
     SELECT 
-        '12-03-2026_' || CAST(record_id AS VARCHAR) AS record_id,
-        TRY_CAST(REGEXP_EXTRACT(age_at_egfr, '~\\s*(\\d+)', 1) AS INTEGER) AS current_age,
-        'F' as sex,
-        CAST(CAST(egfr_date AS DATE) - CAST(time_between_egfr_and_scan AS INTEGER) AS DATE) as scan_date
-    FROM best_egfr
-    WHERE rn = 1
+        '12-03-2026_' || CAST(TRY_CAST(record_id AS INTEGER) AS VARCHAR) AS record_id,
+        MAX(current_age) AS current_age,
+        MAX(CASE 
+            WHEN sex = 0 THEN 'F'
+            WHEN sex = 1 THEN 'M'
+            ELSE NULL 
+        END) AS sex,
+        MAX(scan_date) AS scan_date
+    FROM {bronze_schema}.data_12032026_full
+    GROUP BY 1
     """
     df_demog_12032026 = conn.execute(demog_query).df()
     
@@ -130,7 +147,7 @@ def run_silver_layer():
     df_meas_raw['col_name'] = df_meas_raw['phase'] + '_' + df_meas_raw['anatomical_structure']
     
     pivoted_12032026 = df_meas_raw.pivot(index='record_id', columns='col_name', values='iodine_concentration').reset_index()
-    pivoted_12032026['record_id'] = '12-03-2026_' + pivoted_12032026['record_id'].astype(str)
+    pivoted_12032026['record_id'] = '12-03-2026_' + pivoted_12032026['record_id'].astype(int).astype(str)
     pivoted_12032026['source_folder'] = '12-03-2026'
     
     # Merge measurements with the 'best' demographics
@@ -139,7 +156,19 @@ def run_silver_layer():
     # 4. Union Scans
     final_scans = pd.concat([df_25112025, pivoted_12032026], ignore_index=True, sort=False)
     
-    # Standardize Sex in segmentations
+    # 5. Filter for demographic and measurement completeness
+    metadata_cols = ['record_id', 'current_age', 'sex', 'scan_date', 'source_folder']
+    seg_cols = [c for c in final_scans.columns if c not in metadata_cols]
+    
+    initial_count = len(final_scans)
+    # Drop rows with NULL age or sex
+    final_scans = final_scans.dropna(subset=['current_age', 'sex'])
+    # Drop rows with no measurement data
+    final_scans = final_scans.dropna(subset=seg_cols, how='all')
+    
+    logger.info(f"Filtering: Dropped {initial_count - len(final_scans)} records with missing demographics or measurements.")
+    
+    # 6. Standardize Sex in segmentations
     final_scans['sex'] = final_scans['sex'].map({
         'male': 'M', 'm': 'M', 'Male': 'M', 'M': 'M',
         'female': 'F', 'f': 'F', 'Female': 'F', 'F': 'F'

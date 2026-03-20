@@ -68,10 +68,12 @@ def ingest_12_03_2026(data_dir, logger):
     """Ingest data from the 12-03-2026 folder (new flat CSVs)."""
     egfr_file = data_dir / "egfr_measurements.csv"
     vgfr_file = data_dir / "vgfr_measurements.csv"
+    full_file = data_dir / "Combined_full_dataset.csv"
     
     # These new files use semicolon separators
     egfr_df = pd.read_csv(egfr_file, sep=';') if egfr_file.exists() else None
     vgfr_df = pd.read_csv(vgfr_file, sep=';') if vgfr_file.exists() else None
+    full_df = pd.read_csv(full_file, sep=';') if full_file.exists() else None
     
     if egfr_df is not None: 
         egfr_df['source_folder'] = '12-03-2026'
@@ -80,8 +82,12 @@ def ingest_12_03_2026(data_dir, logger):
     if vgfr_df is not None: 
         vgfr_df['source_folder'] = '12-03-2026'
         logger.info(f"Source 12-03-2026: Loaded {len(vgfr_df)} measurement rows.")
+
+    if full_df is not None:
+        full_df['source_folder'] = '12-03-2026'
+        logger.info(f"Source 12-03-2026: Loaded {len(full_df)} combined full dataset rows.")
         
-    return egfr_df, vgfr_df
+    return egfr_df, vgfr_df, full_df
 
 def run_bronze_layer():
     config = load_config()
@@ -115,11 +121,13 @@ def run_bronze_layer():
                 conn.execute(f"CREATE OR REPLACE TABLE {bronze_schema}.data_25112025_segs AS SELECT * FROM seg_df")
                 
         elif source_name == "12-03-2026":
-            egfr_df, meas_df = ingest_12_03_2026(source_path, logger)
+            egfr_df, meas_df, full_df = ingest_12_03_2026(source_path, logger)
             if egfr_df is not None:
                 conn.execute(f"CREATE OR REPLACE TABLE {bronze_schema}.data_12032026_egfr AS SELECT * FROM egfr_df")
             if meas_df is not None:
                 conn.execute(f"CREATE OR REPLACE TABLE {bronze_schema}.data_12032026_meas AS SELECT * FROM meas_df")
+            if full_df is not None:
+                conn.execute(f"CREATE OR REPLACE TABLE {bronze_schema}.data_12032026_full AS SELECT * FROM full_df")
     
     logger.info("Bronze Layer Ingestion Complete.")
     conn.close()
