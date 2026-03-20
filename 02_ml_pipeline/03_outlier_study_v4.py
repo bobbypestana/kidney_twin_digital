@@ -10,6 +10,11 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from plot_v2 import plot_egfrc_vs_vgfr
+from ml_utils import (
+    parse_args, load_cohort, get_feature_matrix,
+    make_output_path, experiment_name, print_run_banner,
+    OUTPUT_DIR, TARGET
+)
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import LeaveOneOut
@@ -22,13 +27,9 @@ warnings.filterwarnings('ignore')
 
 # Config
 DB_PATH = Path(__file__).parent.parent / 'database' / 'egfr_data_v2.duckdb'
-OUTPUT_DIR = Path(__file__).parent / 'ml_results'
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 MLFLOW_DIR = Path('C:/tmp/vGFR_ML_v4')
 MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
-EXPERIMENT_NAME = "vGFR_Outlier_Study_V4"
-TARGET = 'egfrc'
+BASE_EXPERIMENT = "vGFR_Outlier_Study_V4"
 
 # Use the R13 Champion features for this study
 CHAMPION_FEATS = [
@@ -37,22 +38,6 @@ CHAMPION_FEATS = [
     'late_right_kidney_vein', 'vol_per_age', 'arterial_portal_vein', 
     'age_x_E_arterial', 'E_arterial_mean', 'norm_ven_artery_right'
 ]
-
-def load_data():
-    conn = duckdb.connect(str(DB_PATH), read_only=True)
-    df = conn.execute('SELECT * FROM gold.ml_features').fetchdf()
-    conn.close()
-    
-    meta_cols = [
-        'record_id', 'sex', 'scan_date', 'egfr_date', 'egfr_value',
-        'serum_creatinine', 'redcap_repeat_instance', 'date_diff_days',
-        'source_folder', TARGET
-    ]
-    X = df.drop(columns=[c for c in meta_cols if c in df.columns])
-    X = X.select_dtypes(include=[np.number]).astype(float).fillna(X.median()).fillna(0)
-    y = df[TARGET]
-    record_ids = df['record_id'].astype(str)
-    return X, y, record_ids
 
 def evaluate_with_exclusions(X, y, record_ids, estimator, exclude_from_train=[]):
     """
@@ -85,31 +70,47 @@ def evaluate_with_exclusions(X, y, record_ids, estimator, exclude_from_train=[])
     }
 
 def main():
-    X, y, record_ids = load_data()
-    mlflow.set_tracking_uri(f"file:///{MLFLOW_DIR.as_posix()}")
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    args = parse_args("vGFR Outlier Study V4 (Round 15)")
 
-    # Scenarios: Baseline (none), No 19, No 18, No Both
+    df, _ = load_cohort(args.cohort)
+    X_full, y = get_feature_matrix(df, exclude_vol_hu=args.exclude_vol_hu)
+    record_ids = df['record_id'].astype(str)
+    print_run_banner("03_outlier_study_v4.py", args.cohort, df, X_full)
+
+    # Use champion features that exist in this cohort's X
+    champion_feats = [f for f in CHAMPION_FEATS if f in X_full.columns]
+    missing = set(CHAMPION_FEATS) - set(champion_feats)
+    if missing:
+        print(f"  [warn] Champion features not available for this cohort: {missing}")
+
+    mlflow.set_tracking_uri(f"file:///{MLFLOW_DIR.as_posix()}")
+    mlflow.set_experiment(experiment_name(BASE_EXPERIMENT, args.cohort))
+
+    # Filter scenario exclusion IDs to only those present in this cohort
+    present_ids = set(record_ids.values)
     scenarios = [
         ("round_15_baseline", []),
-        ("round_15_excl_19", ['19']),
-        ("round_15_excl_18", ['18']),
-        ("round_15_excl_both", ['18', '19'])
+        ("round_15_excl_19",   [i for i in ['19'] if any(i in r for r in present_ids)]),
+        ("round_15_excl_18",   [i for i in ['18'] if any(i in r for r in present_ids)]),
+        ("round_15_excl_both", [i for i in ['18', '19'] if any(i in r for r in present_ids)]),
     ]
 
     model = Ridge(alpha=10.0)
-    pipe = Pipeline([('scaler', StandardScaler()), ('model', model)])
+    pipe  = Pipeline([('scaler', StandardScaler()), ('model', model)])
 
     for label, exclude in scenarios:
-        print(f"\n>>> Running Outlier Study: {label}")
-        y_pred, metrics = evaluate_with_exclusions(X[CHAMPION_FEATS], y, record_ids, pipe, exclude)
-        
+        print(f"\n>>> Outlier Study: {label}")
+        y_pred, metrics = evaluate_with_exclusions(
+            X_full[champion_feats], y, record_ids, pipe, exclude
+        )
         with mlflow.start_run(run_name=label):
-            mlflow.log_params({'n_feats': len(CHAMPION_FEATS), 'excluded_ids': ','.join(exclude)})
+            mlflow.log_params({'n_feats': len(champion_feats),
+                               'excluded_ids': ','.join(exclude)})
             mlflow.log_metrics(metrics)
-            
-            plot_path = OUTPUT_DIR / f'{label}_champion.png'
-            plot_egfrc_vs_vgfr(y.values, y_pred, label.replace('_', ' ').title(), CHAMPION_FEATS, metrics, plot_path)
+
+            plot_path = make_output_path(label, cohort=args.cohort)
+            plot_egfrc_vs_vgfr(y.values, y_pred, label.replace('_', ' ').title(),
+                               champion_feats, metrics, plot_path)
             mlflow.log_artifact(str(plot_path))
             print(f"[OK] {label}: MAE={metrics['MAE']:.2f} R2={metrics['R2']:.3f}")
 

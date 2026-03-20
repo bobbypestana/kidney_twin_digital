@@ -11,6 +11,11 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from plot_v2 import plot_egfrc_vs_vgfr
+from ml_utils import (
+    parse_args, load_cohort, get_feature_matrix,
+    make_output_path, experiment_name, print_run_banner,
+    OUTPUT_DIR, TARGET
+)
 from sklearn.linear_model import Ridge, HuberRegressor, BayesianRidge
 from sklearn.ensemble import StackingRegressor
 from sklearn.svm import SVR
@@ -25,13 +30,9 @@ warnings.filterwarnings('ignore')
 
 # Config
 DB_PATH = Path(__file__).parent.parent / 'database' / 'egfr_data_v2.duckdb'
-OUTPUT_DIR = Path(__file__).parent / 'ml_results'
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 MLFLOW_DIR = Path('C:/tmp/vGFR_ML_v3')
 MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
-EXPERIMENT_NAME = "vGFR_Improvements_V3"
-TARGET = 'egfrc'
+BASE_EXPERIMENT = "vGFR_Improvements_V3"
 
 # ============================================================================
 # Core LOOCV Engine
@@ -85,22 +86,6 @@ def stepwise_blended_rank(X, y_arr, base_estimator, max_features=12):
 # Experiments
 # ============================================================================
 
-def load_data():
-    conn = duckdb.connect(str(DB_PATH), read_only=True)
-    df = conn.execute('SELECT * FROM gold.ml_features').fetchdf()
-    conn.close()
-    
-    meta_cols = [
-        'record_id', 'sex', 'scan_date', 'egfr_date', 'egfr_value',
-        'serum_creatinine', 'redcap_repeat_instance', 'date_diff_days',
-        'source_folder', TARGET
-    ]
-    X = df.drop(columns=[c for c in meta_cols if c in df.columns])
-    X = X.select_dtypes(include=[np.number]).astype(float).fillna(X.median()).fillna(0)
-    y = df[TARGET]
-    data_hash = hashlib.sha256(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()[:16]
-    return X, y, data_hash
-
 def exp_r11_hybrid_stats(X, y):
     print("\n>>> Round 11: Gold + Bronze Hybrid Stats (Rank-Blended)")
     model = BayesianRidge()
@@ -146,36 +131,37 @@ def exp_r14_bayesian_pruning(X, y):
 # ============================================================================
 
 def main():
-    X, y, data_hash = load_data()
+    args = parse_args("vGFR Improvements V3 (Rounds 11–14)")
+
+    df, data_hash = load_cohort(args.cohort)
+    X, y = get_feature_matrix(df, exclude_vol_hu=args.exclude_vol_hu)
+    print_run_banner("02_improvements_v3.py", args.cohort, df, X)
+
     mlflow.set_tracking_uri(f"file:///{MLFLOW_DIR.as_posix()}")
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    mlflow.set_experiment(experiment_name(BASE_EXPERIMENT, args.cohort))
 
     results = []
-    
-    # Run R11
+
     f11, p11, m11, t11 = exp_r11_hybrid_stats(X, y)
     results.append((f11, p11, m11, t11))
-    
-    # Run R13 (Interactions)
+
     f13, p13, m13, t13 = exp_r13_non_linear(X, y)
     results.append((f13, p13, m13, t13))
 
-    # Run R12 (Stacking - using the best features from R13)
-    f12, p12, m12, t12 = exp_r12_stacking(X, y, f13) # Better base
+    f12, p12, m12, t12 = exp_r12_stacking(X, y, f13)
     results.append((f12, p12, m12, t12))
 
-    # Run R14 (Bayesian Pruning)
     f14, p14, m14, t14 = exp_r14_bayesian_pruning(X, y)
     results.append((f14, p14, m14, t14))
 
-    # Log to MLflow and Plot
     for feats, y_pred, metrics, tag in results:
         with mlflow.start_run(run_name=tag):
             mlflow.log_params({'features': ', '.join(feats), 'n_feats': len(feats)})
             mlflow.log_metrics(metrics)
-            
-            plot_path = OUTPUT_DIR / f'{tag}_champion.png'
-            plot_egfrc_vs_vgfr(y.values, y_pred, tag.replace('_', ' ').title(), feats, metrics, plot_path)
+
+            plot_path = make_output_path(tag, cohort=args.cohort)
+            plot_egfrc_vs_vgfr(y.values, y_pred, tag.replace('_', ' ').title(),
+                               feats, metrics, plot_path)
             mlflow.log_artifact(str(plot_path))
             print(f"[OK] {tag}: MAE={metrics['MAE']:.2f} R2={metrics['R2']:.3f}")
 

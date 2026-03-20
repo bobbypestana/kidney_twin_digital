@@ -11,6 +11,11 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from plot_v2 import plot_egfrc_vs_vgfr
+from ml_utils import (
+    parse_args, load_cohort, get_feature_matrix,
+    make_output_path, experiment_name, print_run_banner,
+    OUTPUT_DIR, TARGET
+)
 from sklearn.linear_model import Ridge, Lasso, ElasticNet, HuberRegressor, BayesianRidge
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
@@ -25,13 +30,9 @@ warnings.filterwarnings('ignore')
 
 # Config
 DB_PATH = Path(__file__).parent.parent / 'database' / 'egfr_data_v2.duckdb'
-OUTPUT_DIR = Path(__file__).parent / 'ml_results'
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 MLFLOW_DIR = Path('C:/tmp/vGFR_Repro_v2')
 MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
-EXPERIMENT_NAME = "vGFR_Repro_R2_R10"
-TARGET = 'egfrc'
+BASE_EXPERIMENT = "vGFR_Repro_R2_R10"
 
 # ============================================================================
 # Data Loading
@@ -264,56 +265,56 @@ def run_experiment(round_id, X, y, data_hash, strategy_fn, models, params):
         # Champion for the round
         best_model = max(results, key=lambda k: results[k]['metrics']['R2'])
         best = results[best_model]
-        plot_path = OUTPUT_DIR / f'round_{round_id}_champion.png'
-        plot_egfrc_vs_vgfr(y.values, best['y_pred'], f"Round {round_id} Champ: {best_model}", 
+        plot_path = make_output_path(f'round_{round_id}', cohort=_COHORT)
+        plot_egfrc_vs_vgfr(y.values, best['y_pred'], f"Round {round_id} Champ: {best_model}",
                            best['features'], best['metrics'], plot_path)
         mlflow.log_artifact(str(plot_path))
         
     return results
 
+_COHORT = None  # set in main
+
 def main():
-    df, meta, data_hash = load_data()
+    global _COHORT
+    args = parse_args("vGFR Reproduction Suite (Rounds 2–10)")
+    _COHORT = args.cohort
+
+    df, data_hash = load_cohort(_COHORT)
+    X, y = get_feature_matrix(df, exclude_vol_hu=args.exclude_vol_hu)
+    print_run_banner("01_repro_r2_r10.py", _COHORT, df, X)
+
     mlflow.set_tracking_uri(f"file:///{MLFLOW_DIR.as_posix()}")
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    mlflow.set_experiment(experiment_name(BASE_EXPERIMENT, _COHORT))
+
+    # ── Filter helpers that operate on X (no meta needed) ────────────────────
+    def filter_kidney(X_):
+        return X_[[c for c in X_.columns if 'kidney' in c.lower() or 'aorta' in c.lower()]]
 
     # Models
-    ridge = Ridge(alpha=10.0)
+    ridge    = Ridge(alpha=10.0)
     bayesian = BayesianRidge()
-    rf = RandomForestRegressor(n_estimators=30, max_depth=3, random_state=42)
-    svr = SVR(kernel='rbf', C=10.0)
+    rf       = RandomForestRegressor(n_estimators=30, max_depth=3, random_state=42)
+    svr      = SVR(kernel='rbf', C=10.0)
 
-    # R2: Basic Competition
-    X, y = get_base_Xy(df, meta)
-    run_experiment("2", X, y, data_hash, stepwise_standard, {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Baseline Stepwise'})
+    run_experiment("2",  X, y, data_hash, stepwise_standard,
+                   {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Baseline Stepwise'})
+    run_experiment("3",  filter_kidney(X), y, data_hash, stepwise_standard,
+                   {'Ridge': ridge}, {'restriction': 'Kidney-Only'})
+    run_experiment("4",  X, y, data_hash, stepwise_pairwise,
+                   {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Pairwise'})
+    run_experiment("5",  X, y, data_hash,
+                   lambda X_, y_, est: stepwise_standard(X_, y_, est, metric='MAE'),
+                   {'Ridge': ridge}, {'type': 'MAE-Optim'})
+    run_experiment("7",  X, y, data_hash, stepwise_blended_rank,
+                   {'Ridge': ridge, 'Bayesian': bayesian, 'RF': rf}, {'type': 'Rank-Blended'})
+    run_experiment("8",  X, y, data_hash,
+                   lambda X_, y_, est: stepwise_forced_n(X_, y_, est, force_n=7),
+                   {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Forced-N'})
+    run_experiment("10", X, y, data_hash, stepwise_blended_rank,
+                   {'Ridge': ridge, 'Bayesian': bayesian, 'RF': rf,
+                    'SVR': svr, 'Huber': HuberRegressor()}, {'type': 'Full-Competition'})
 
-    # R3: Feature Restrictions (Strict Kidney Only)
-    def filter_kidney(X):
-        return X[[c for c in X.columns if 'kidney' in c.lower() or 'aorta' in c.lower()]]
-    X, y = get_base_Xy(df, meta, filter_fn=filter_kidney)
-    run_experiment("3", X, y, data_hash, stepwise_standard, {'Ridge': ridge}, {'restriction': 'Kidney-Only'})
-
-    # R4: Pairwise Bilateral
-    X, y = get_base_Xy(df, meta)
-    run_experiment("4", X, y, data_hash, stepwise_pairwise, {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Pairwise'})
-
-    # R5: MAE Optimization
-    X, y = get_base_Xy(df, meta)
-    run_experiment("5", X, y, data_hash, lambda X, y, est: stepwise_standard(X, y, est, metric='MAE'), {'Ridge': ridge}, {'type': 'MAE-Optim'})
-
-    # R7: Rank-Blended Selection
-    run_experiment("7", X, y, data_hash, stepwise_blended_rank, {'Ridge': ridge, 'Bayesian': bayesian, 'RF': rf}, {'type': 'Rank-Blended'})
-
-    # R8/R9: Forced N
-    run_experiment("8", X, y, data_hash, lambda X, y, est: stepwise_forced_n(X, y, est, force_n=7), {'Ridge': ridge, 'Bayesian': bayesian}, {'type': 'Forced-N'})
-
-    # R10: Full Competition (All models + Blended Rank)
-    models_full = {
-        'Ridge': ridge, 'Bayesian': bayesian, 'RF': rf, 'SVR': svr,
-        'Huber': HuberRegressor()
-    }
-    run_experiment("10", X, y, data_hash, stepwise_blended_rank, models_full, {'type': 'Full-Competition'})
-
-    print(f"\n[DONE] All reproductions complete. Tracking logged to: {MLFLOW_DIR}")
+    print(f"\n[DONE] Tracking logged to: {MLFLOW_DIR}")
 
 if __name__ == '__main__':
     main()
