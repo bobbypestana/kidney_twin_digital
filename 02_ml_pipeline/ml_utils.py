@@ -162,6 +162,7 @@ def experiment_name(base_name, cohort=None):
 
 
 # ─── Summary Banner ───────────────────────────────────────────────────────────
+# ─── Summary Banner ───────────────────────────────────────────────────────────
 def print_run_banner(script_name, cohort, df, X):
     tag = safe_cohort_tag(cohort)
     print("=" * 60)
@@ -171,3 +172,96 @@ def print_run_banner(script_name, cohort, df, X):
     print(f"  Features : {X.shape[1]}")
     print(f"  Target   : {TARGET}")
     print("=" * 60)
+
+# ─── Export Utilities ────────────────────────────────────────────────────────
+def export_champion_details(cohort_id, round_name, model_name, features, estimator, metrics, y_true, y_pred, story="", is_report_champion=False):
+    """
+    Save all clinical artifacts (Weights, Residuals, Distributions) for a champion model.
+    Organized in ml_results/{cohort_tag}/
+    If is_report_champion=True, also copies main plots to results/figures/ for LaTeX.
+    """
+    import json
+    import shutil
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+    
+    tag = safe_cohort_tag(cohort_id)
+    out_dir = OUTPUT_DIR / tag
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Report freeze directory
+    report_fig_dir = Path(__file__).parent.parent / 'results' / 'figures'
+    report_fig_dir.mkdir(parents=True, exist_ok=True)
+
+    # Standardize round name to match tag (e.g. 'Round 3' -> 'round_3')
+    round_tag = round_name.lower().replace(' ', '_')
+    
+    print(f"  [export] Saving {round_name} champion details to {out_dir}...")
+
+    # 1. Weights CSV (if linear)
+    if hasattr(estimator, 'named_steps'): # It's a pipeline
+        model = estimator.named_steps['model']
+    else:
+        model = estimator
+
+    if hasattr(model, 'coef_'):
+        weights = model.coef_
+        pd.DataFrame({'Feature': features, 'Weight': weights}).to_csv(out_dir / f"{round_tag}_weights.csv", index=False)
+    
+    # 2. Relevance Plot
+    if hasattr(model, 'coef_'):
+        df_p = pd.DataFrame({'Feature': features, 'Weight': model.coef_}).sort_values('Weight', key=abs, ascending=False)
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=df_p, x='Weight', y='Feature', palette='vlag', orient='h')
+        plt.title(f"Feature Relevance: {round_name}")
+        plt.tight_layout()
+        relevance_path = out_dir / f"{round_tag}_relevance.png"
+        plt.savefig(relevance_path)
+        plt.close()
+        
+        if is_report_champion:
+            shutil.copy2(relevance_path, report_fig_dir / f"{round_tag}_feature_relevance.png")
+
+    # 3. Residual Plot
+    residuals = y_true - y_pred
+    plt.figure(figsize=(8, 6))
+    plt.scatter(y_pred, residuals, alpha=0.6)
+    plt.axhline(0, color='red', linestyle='--')
+    plt.xlabel('Predicted vGFR')
+    plt.ylabel('Residuals (Actual - Predicted)')
+    plt.title(f"Residual Analysis: {round_name}")
+    plt.grid(True, alpha=0.3)
+    plt.savefig(out_dir / f"{round_tag}_residuals.png")
+    plt.close()
+
+    # 4. Distribution (Violin)
+    df_dist = pd.DataFrame({
+        'Source': ['Actual']*len(y_true) + ['Predicted']*len(y_pred),
+        'vGFR': np.concatenate([y_true, y_pred])
+    })
+    plt.figure(figsize=(8, 6))
+    sns.violinplot(data=df_dist, x='Source', y='vGFR', inner='quart')
+    plt.title(f"Prediction Distribution: {round_name}")
+    plt.savefig(out_dir / f"{round_tag}_distribution.png")
+    plt.close()
+
+    # 5. Champion Plot (Identity) - Copy to Report if needed
+    if is_report_champion:
+        tag_short = safe_cohort_tag(cohort_id)
+        src_plot = OUTPUT_DIR / f"{tag_short}_{round_tag}_champion.png"
+        if src_plot.exists():
+            shutil.copy2(src_plot, report_fig_dir / f"{round_tag}_champion_plot_official.png")
+
+    # 6. Summary JSON
+    summary = {
+        'cohort': cohort_id,
+        'round': round_name,
+        'model': model_name,
+        'metrics': metrics,
+        'features': features,
+        'clinical_story': story
+    }
+    with open(out_dir / f"{round_tag}_summary.json", 'w') as f:
+        json.dump(summary, f, indent=4)

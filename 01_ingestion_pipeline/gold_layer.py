@@ -1,14 +1,35 @@
+import logging
 import pandas as pd
 import duckdb
+from typing import Any, Dict
 from lib.utils import load_config, setup_logging, get_db_connection
+from 01_ingestion_pipeline.schemas import GoldFeatureRecord
 
-def run_gold_layer():
-    config = load_config()
-    logger = setup_logging("gold_layer", config['paths']['logs'])
-    conn = get_db_connection(config['paths']['database'])
+def run_gold_layer() -> None:
+    """Standardize ML features by joining scans with the closest eGFR measurements.
     
-    gold_schema = config['schemas']['gold']
-    silver_schema = config['schemas']['silver']
+    This function performs:
+    1.  Master case creation (Closest eGFR for each scan).
+    2.  Legacy feature integration (Pivoting old kidney volume/HU data).
+    3.  Complex feature engineering (Ratios like E_arterial, interaction terms like age_x_vol).
+    4.  Validation of final records using Pydantic.
+    5.  Idempotent output of the `gold.ml_features` table.
+    
+    Args:
+        None (uses configuration from load_config()).
+        
+    Returns:
+        None.
+        
+    Raises:
+        Exception: If the transformation or validation fails.
+    """
+    config: Dict[str, Any] = load_config()
+    logger: logging.Logger = setup_logging("gold_layer", config["paths"]["logs"])
+    conn: duckdb.DuckDBPyConnection = get_db_connection(config["paths"]["database"])
+    
+    gold_schema: str = config["schemas"]["gold"]
+    silver_schema: str = config["schemas"]["silver"]
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {gold_schema}")
     
     logger.info("Starting Gold Layer Synthesis (Closest eGFR Join)...")
@@ -51,7 +72,7 @@ def run_gold_layer():
         # 1. Pivot Legacy Bronze Features
         logger.info("Pivoting Legacy Bronze Features...")
         pivot_sqls = []
-        for phase in ['arterial', 'venous', 'late']:
+        for phase in ["arterial", "venous", "late"]:
             pivot_sqls.append(f"""
                 SELECT 
                     '25-11-2025_' || CAST(case_number AS VARCHAR) as record_id,
@@ -135,12 +156,22 @@ def run_gold_layer():
         """
         conn.execute(ml_features_query)
         
-        count = conn.execute(f"SELECT COUNT(*) FROM {gold_schema}.ml_features").fetchone()[0]
-        logger.info(f"Gold Layer Synthesis Complete: Generated ml_features ({count} records) with {len(conn.execute('DESCRIBE gold.ml_features').df())} columns.")
+        # 3. Pydantic Validation (Sample check)
+        logger.info("Validating Gold features with Pydantic...")
+        df_gold = conn.execute(f"SELECT * FROM {gold_schema}.ml_features LIMIT 10").df()
+        for idx, row in df_gold.iterrows():
+            GoldFeatureRecord(**row.to_dict())
+        
+        count: int = conn.execute(f"SELECT COUNT(*) FROM {gold_schema}.ml_features").fetchone()[0]
+        logger.info(
+            f"Gold Layer Synthesis Complete: Generated ml_features ({count} records) "
+            f"with {len(conn.execute('DESCRIBE gold.ml_features').df())} columns."
+        )
     except Exception as e:
         logger.error(f"Failed to synthesize Gold layer: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        raise e
     finally:
         conn.close()
 

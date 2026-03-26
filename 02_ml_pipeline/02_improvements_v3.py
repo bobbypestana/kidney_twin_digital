@@ -90,7 +90,9 @@ def exp_r11_hybrid_stats(X, y):
     print("\n>>> Round 11: Gold + Bronze Hybrid Stats (Rank-Blended)")
     model = BayesianRidge()
     feats, y_pred, metrics = stepwise_blended_rank(X, y.values, model)
-    return feats, y_pred, metrics, "round_11"
+    est = Pipeline([('scaler', StandardScaler()), ('model', model)])
+    est.fit(X[feats], y)
+    return feats, y_pred, metrics, "round_11", est
 
 def exp_r12_stacking(X, y, selected_features):
     print("\n>>> Round 12: Stacking Ensemble (Bayesian + Huber + SVR)")
@@ -102,13 +104,16 @@ def exp_r12_stacking(X, y, selected_features):
     stack = StackingRegressor(estimators=estimators, final_estimator=Ridge(alpha=1.0))
     pipe = Pipeline([('scaler', StandardScaler()), ('model', stack)])
     y_pred, metrics = evaluate_loocv(X[selected_features].values, y.values, pipe)
-    return selected_features, y_pred, metrics, "round_12"
+    pipe.fit(X[selected_features], y)
+    return selected_features, y_pred, metrics, "round_12", pipe
 
 def exp_r13_non_linear(X, y):
     print("\n>>> Round 13: Non-Linear Interaction Search")
     model = Ridge(alpha=10.0)
     feats, y_pred, metrics = stepwise_blended_rank(X, y.values, model)
-    return feats, y_pred, metrics, "round_13"
+    est = Pipeline([('scaler', StandardScaler()), ('model', model)])
+    est.fit(X[feats], y)
+    return feats, y_pred, metrics, "round_13", est
 
 def exp_r14_bayesian_pruning(X, y):
     print("\n>>> Round 14: Bayesian Selecting based on Coefficient Stability")
@@ -124,7 +129,9 @@ def exp_r14_bayesian_pruning(X, y):
     final_feats = [initial_feats[i] for i in stable_idx]
     
     y_pred, metrics = evaluate_loocv(X[final_feats].values, y.values, Pipeline([('scaler', StandardScaler()), ('model', model)]))
-    return final_feats, y_pred, metrics, "round_14"
+    est = Pipeline([('scaler', StandardScaler()), ('model', model)])
+    est.fit(X[final_feats], y)
+    return final_feats, y_pred, metrics, "round_14", est
 
 # ============================================================================
 # Main Execution
@@ -142,19 +149,19 @@ def main():
 
     results = []
 
-    f11, p11, m11, t11 = exp_r11_hybrid_stats(X, y)
-    results.append((f11, p11, m11, t11))
+    f11, p11, m11, t11, e11 = exp_r11_hybrid_stats(X, y)
+    results.append((f11, p11, m11, t11, e11))
 
-    f13, p13, m13, t13 = exp_r13_non_linear(X, y)
-    results.append((f13, p13, m13, t13))
+    f13, p13, m13, t13, e13 = exp_r13_non_linear(X, y)
+    results.append((f13, p13, m13, t13, e13))
 
-    f12, p12, m12, t12 = exp_r12_stacking(X, y, f13)
-    results.append((f12, p12, m12, t12))
+    f12, p12, m12, t12, e12 = exp_r12_stacking(X, y, f13)
+    results.append((f12, p12, m12, t12, e12))
 
-    f14, p14, m14, t14 = exp_r14_bayesian_pruning(X, y)
-    results.append((f14, p14, m14, t14))
+    f14, p14, m14, t14, e14 = exp_r14_bayesian_pruning(X, y)
+    results.append((f14, p14, m14, t14, e14))
 
-    for feats, y_pred, metrics, tag in results:
+    for feats, y_pred, metrics, tag, est in results:
         with mlflow.start_run(run_name=tag):
             mlflow.log_params({'features': ', '.join(feats), 'n_feats': len(feats)})
             mlflow.log_metrics(metrics)
@@ -163,6 +170,13 @@ def main():
             plot_egfrc_vs_vgfr(y.values, y_pred, tag.replace('_', ' ').title(),
                                feats, metrics, plot_path)
             mlflow.log_artifact(str(plot_path))
+            
+            # [NEW] Systematic Export
+            from ml_utils import export_champion_details
+            export_champion_details(
+                args.cohort, tag.replace('_', ' ').title(), "Champion",
+                feats, est, metrics, y.values, y_pred
+            )
             print(f"[OK] {tag}: MAE={metrics['MAE']:.2f} R2={metrics['R2']:.3f}")
 
 if __name__ == '__main__':

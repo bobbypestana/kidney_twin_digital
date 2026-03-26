@@ -259,7 +259,16 @@ def run_experiment(round_id, X, y, data_hash, strategy_fn, models, params):
                 mlflow.log_metrics(metrics)
                 mlflow.log_param('features', ', '.join(feats))
                 
-                results[model_name] = {'metrics': metrics, 'y_pred': y_pred, 'features': feats}
+                # Fit final on selected features to capture weights
+                final_est = Pipeline([('scaler', StandardScaler()), ('model', estimator)])
+                final_est.fit(X[feats], y)
+                
+                results[model_name] = {
+                    'metrics': metrics, 
+                    'y_pred': y_pred, 
+                    'features': feats,
+                    'estimator': final_est
+                }
                 print(f"    MAE={metrics['MAE']:.2f} R2={metrics['R2']:.3f} Features={len(feats)}")
 
         # Champion for the round
@@ -269,6 +278,15 @@ def run_experiment(round_id, X, y, data_hash, strategy_fn, models, params):
         plot_egfrc_vs_vgfr(y.values, best['y_pred'], f"Round {round_id} Champ: {best_model}",
                            best['features'], best['metrics'], plot_path)
         mlflow.log_artifact(str(plot_path))
+        
+        # [NEW] Systematic Export (using the actual fitted estimator from the trial)
+        from ml_utils import export_champion_details
+        export_champion_details(
+            _COHORT, f"Round {round_id}", best_model,
+            best['features'], best['estimator'], best['metrics'],
+            y.values, best['y_pred'],
+            is_report_champion=(str(round_id) == "3")
+        )
         
     return results
 
