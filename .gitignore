@@ -64,3 +64,6 @@ local_config.yaml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Temp ---
+tmp/
