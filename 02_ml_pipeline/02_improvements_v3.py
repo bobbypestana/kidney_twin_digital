@@ -98,10 +98,10 @@ def exp_r12_stacking(X, y, selected_features):
     print("\n>>> Round 12: Stacking Ensemble (Bayesian + Huber + SVR)")
     estimators = [
         ('bayesian', BayesianRidge()),
-        ('huber', HuberRegressor()),
+        ('huber', HuberRegressor(max_iter=1000, epsilon=1.5)),
         ('svr', SVR(kernel='rbf', C=10.0))
     ]
-    stack = StackingRegressor(estimators=estimators, final_estimator=Ridge(alpha=1.0))
+    stack = StackingRegressor(estimators=estimators, final_estimator=Ridge(alpha=1.0), passthrough=False)
     pipe = Pipeline([('scaler', StandardScaler()), ('model', stack)])
     y_pred, metrics = evaluate_loocv(X[selected_features].values, y.values, pipe)
     pipe.fit(X[selected_features], y)

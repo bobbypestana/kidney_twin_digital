@@ -3,7 +3,13 @@ import pandas as pd
 import duckdb
 from typing import Any, Dict
 from lib.utils import load_config, setup_logging, get_db_connection
-from 01_ingestion_pipeline.schemas import GoldFeatureRecord
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
+try:
+    from schemas import GoldFeatureRecord
+except ImportError:
+    from .schemas import GoldFeatureRecord
 
 def run_gold_layer() -> None:
     """Standardize ML features by joining scans with the closest eGFR measurements.
@@ -69,44 +75,15 @@ def run_gold_layer() -> None:
     try:
         conn.execute(closest_query)
         
-        # 1. Pivot Legacy Bronze Features
-        logger.info("Pivoting Legacy Bronze Features...")
-        pivot_sqls = []
-        for phase in ["arterial", "venous", "late"]:
-            pivot_sqls.append(f"""
-                SELECT 
-                    '25-11-2025_' || CAST(case_number AS VARCHAR) as record_id,
-                    MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Volume cm3 (LM)" END) as {phase}_kidney_vol,
-                    MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Mean" END) as {phase}_kidney_hu_mean,
-                    MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Standard deviation" END) as {phase}_kidney_hu_std,
-                    MAX(CASE WHEN Segment LIKE '%threshold%' THEN "Median" END) as {phase}_kidney_hu_median
-                FROM bronze.legacy_{phase}_segmentation
-                GROUP BY 1
-            """)
-        
-        conn.execute(f"""
-            CREATE OR REPLACE TEMP TABLE bronze_pivoted AS
-            SELECT 
-                a.record_id,
-                a.arterial_kidney_vol, a.arterial_kidney_hu_mean, a.arterial_kidney_hu_std, a.arterial_kidney_hu_median,
-                v.venous_kidney_vol, v.venous_kidney_hu_mean, v.venous_kidney_hu_std, v.venous_kidney_hu_median,
-                l.late_kidney_vol, l.late_kidney_hu_mean, l.late_kidney_hu_std, l.late_kidney_hu_median
-            FROM ({pivot_sqls[0]}) a
-            LEFT JOIN ({pivot_sqls[1]}) v ON a.record_id = v.record_id
-            LEFT JOIN ({pivot_sqls[2]}) l ON a.record_id = l.record_id
-        """)
-
-        # 2. Main ML Feature Engineering
+        # 1. Main ML Feature Engineering
         logger.info("Creating Gold ML Features table with Non-Linear Interactions...")
         ml_features_query = f"""
         CREATE OR REPLACE TABLE {gold_schema}.ml_features AS
         WITH base AS (
             SELECT 
                 m.* EXCLUDE (sex),
-                b.* EXCLUDE (record_id),
                 CASE m.sex WHEN 'M' THEN 1.0 WHEN 'F' THEN 0.0 ELSE NULL END AS sex
             FROM {gold_schema}.master_cases m
-            LEFT JOIN bronze_pivoted b ON m.record_id = b.record_id
         ),
         calculated_ratios AS (
             SELECT 
@@ -139,10 +116,8 @@ def run_gold_layer() -> None:
             SELECT 
                 *,
                 current_age * E_arterial_mean AS age_x_E_arterial,
-                current_age * arterial_kidney_vol AS age_x_vol,
                 E_arterial_mean * mean_artery_arterial AS art_flow_efficiency,
-                E_venous_mean * mean_artery_venous AS ven_flow_efficiency,
-                arterial_kidney_vol / NULLIF(current_age, 0) AS vol_per_age
+                E_venous_mean * mean_artery_venous AS ven_flow_efficiency
             FROM mean_excretions
         )
         SELECT * EXCLUDE (

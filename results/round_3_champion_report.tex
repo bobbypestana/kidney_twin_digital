@@ -54,8 +54,7 @@ To understand how the model arrived at its predictions, we define four core mode
 \subsubsection{Stepwise Standard Selection}
 \textbf{The Curator:} We have dozens of potential features, but using all of them ($\approx 65$ features for $25$ patients) is risky. Stepwise selection is a greedy search algorithm:
 \begin{itemize}
-     \item \textit{How it works:} It starts with zero features. It tests every feature and picks the one that single-handedly explains the most variance. Then it looks for a second feature that adds the most value \textit{on top of the first}, and so on. We set a limit of maximum 12 features, to further avoid over-fitting.
-    
+     \item \textit{How it works:} It starts with zero features. It tests every feature and picks the one that single-handedly explains the most variance. Then it looks for a second feature that adds the most value \textit{on top of the first}, and so on. We set a limit of maximum 12 features, to further avoid over-fitting. In this specific run, the model converged at \textbf{6 features}.
 \end{itemize}
 
 \subsection{Clinical Metrics and Stability}
@@ -65,8 +64,8 @@ To simulate real-world usage, we used LOOCV. This means we trained the model 25 
 
 \subsubsection{Performance Results}
 \begin{itemize}
-    \item \textbf{Mean Absolute Error (MAE):} $9.71 \, \text{ml/min/1.73m}^2$. On average, our prediction is off by about 9 units.
-    \item \textbf{$R^2$ (Signal Strength):} $0.289$. The model successfully explains ~29\% of the variation in kidney function purely from CT image data.
+    \item \textbf{Mean Absolute Error (MAE):} $10.82 \, \text{ml/min/1.73m}^2$. On average, our prediction is off by about 11 units.
+    \item \textbf{$R^2$ (Signal Strength):} $0.191$. The model successfully explains ~19\% of the variation in kidney function purely from CT image data (vascular-only).
     \item \textbf{Stability ($p=0.001$):} We tested if this $R^2$ was due to "luck" by scrambling the data 1,000 times. The resulting p-value of 0.001 proves that the model is finding a genuine physiological signal.
 \end{itemize}
 
@@ -85,18 +84,12 @@ The model intercept is \textbf{95.61}. This is the initial baseline prediction f
 \hline
 \textbf{Rank} & \textbf{Full Feature Name} & \textbf{Weight} & \textbf{Calculation / Measurement Method} \\
 \hline
-1 & \texttt{arterial\_venacava\_below\_kidney} & 1.25 & Point HU measurement in infra-renal IVC. \\
-2 & \texttt{arterial\_right\_kidney\_vein} & 4.50 & Point HU in Inferior Vena Cava (IVC) below kidneys. \\
-3 & \texttt{arterial\_venecava\_between\_kidney\_hepatic} & 2.72 & Point HU in Inferior Vena Cava (IVC) below kidneys. \\
-4 & \texttt{arterial\_left\_kidney\_artery} & -1.31 & Point HU measurement in left renal artery. \\
-5 & \texttt{venous\_right\_kidney\_artery} & 1.75 & Point HU (Venous phase) in right renal artery. \\
-6 & \texttt{venous\_kidney\_hu\_mean} & -3.21 & \textbf{Mean} of all pixel HUs in the 3D kidney mask. \\
-7 & \texttt{arterial\_left\_kidney\_vein} & 2.02 & Point HU measurement in left renal vein. \\
-8 & \texttt{arterial\_aorta} & -1.72 & Point HU measurement in abdominal aorta. \\
-9 & \texttt{late\_right\_kidney\_vein} & 3.14 & Point HU (Late phase) in right renal vein. \\
-10 & \texttt{late\_kidney\_vol} & 2.18 & \textbf{Sum} of all voxels in 3D mask ($cm^3$). \\
-11 & \texttt{arterial\_right\_kidney\_artery} & -2.37 & Point HU measurement in right renal artery. \\
-12 & \texttt{venous\_venacava\_between\_kidney\_hepatic} & 1.85 & Point HU (Venous phase) in mid-renal IVC. \\
+1 & \texttt{arterial\_venacava\_below\_kidney} & 1.96 & Point HU measurement in infra-renal IVC. \\
+2 & \texttt{arterial\_right\_kidney\_vein} & 4.98 & Point HU in right renal vein. \\
+3 & \texttt{arterial\_venecava\_between\_kidney\_hepatic} & 3.14 & Point HU in mid-renal Inferior Vena Cava (IVC). \\
+4 & \texttt{arterial\_left\_kidney\_artery} & -1.34 & Point HU measurement in left renal artery. \\
+5 & \texttt{venous\_right\_kidney\_artery} & 2.04 & Point HU (Venous phase) in right renal artery. \\
+6 & \texttt{arterial\_right\_kidney\_artery} & -2.55 & Point HU measurement in right renal artery. \\
 \hline
 \end{tabular}
 \caption{Model features, weights, and derivation logic.}

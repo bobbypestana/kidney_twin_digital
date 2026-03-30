@@ -43,6 +43,12 @@ def parse_args(description="vGFR ML experiment"):
         help='Exclude volume and HU distribution features '
              '(use for cohorts without volume segmentation).'
     )
+    parser.add_argument(
+        '--exclude-age',
+        action='store_true',
+        default=False,
+        help='Exclude current_age from the feature matrix.'
+    )
     return parser.parse_args()
 
 
@@ -87,13 +93,14 @@ def load_cohort(cohort=None):
 
 
 # ─── Feature Matrix ───────────────────────────────────────────────────────────
-def get_feature_matrix(df, exclude_vol_hu=False):
+def get_feature_matrix(df, exclude_vol_hu=False, exclude_age=False):
     """
     Build X and y from a gold feature DataFrame.
 
     - Drops all meta/target columns.
     - Keeps only numeric columns.
     - Optionally drops volume and HU columns (all-NULL on new cohort).
+    - Optionally drops current_age.
     - Auto-skips columns that are entirely NULL for the given data.
     - Fills remaining NAs with column median.
 
@@ -112,6 +119,20 @@ def get_feature_matrix(df, exclude_vol_hu=False):
                      if any(p in c.lower() for p in vol_hu_patterns)],
             errors='ignore'
         )
+
+    if exclude_age:
+        age_cols = [c for c in X.columns if 'age' in c.lower()]
+        if age_cols:
+            X = X.drop(columns=age_cols)
+
+    # Auto-skip columns dropping under a 30% missingness threshold
+    drop_na_thresh = 0.30
+    if drop_na_thresh is not None:
+        missing_rates = X.isna().mean()
+        to_drop = missing_rates[missing_rates > drop_na_thresh].index
+        if len(to_drop):
+            print(f"  [auto-skip] {len(to_drop)} columns dropped (>{drop_na_thresh*100:.0f}% NA).")
+            X = X.drop(columns=to_drop)
 
     # Auto-skip fully-NULL columns (feature doesn't exist for this cohort)
     all_null = X.columns[X.isna().all()]
@@ -211,8 +232,10 @@ def export_champion_details(cohort_id, round_name, model_name, features, estimat
         pd.DataFrame({'Feature': features, 'Weight': weights}).to_csv(out_dir / f"{round_tag}_weights.csv", index=False)
     
     # 2. Relevance Plot
-    if hasattr(model, 'coef_'):
-        df_p = pd.DataFrame({'Feature': features, 'Weight': model.coef_}).sort_values('Weight', key=abs, ascending=False)
+    has_weights = hasattr(model, 'coef_') or hasattr(model, 'feature_importances_')
+    if has_weights:
+        weights = model.coef_ if hasattr(model, 'coef_') else model.feature_importances_
+        df_p = pd.DataFrame({'Feature': features, 'Weight': weights}).sort_values('Weight', key=abs, ascending=False)
         plt.figure(figsize=(10, 6))
         sns.barplot(data=df_p, x='Weight', y='Feature', palette='vlag', orient='h')
         plt.title(f"Feature Relevance: {round_name}")
